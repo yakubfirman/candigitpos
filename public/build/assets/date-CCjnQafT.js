@@ -1,0 +1,1 @@
+function a(t){return new Intl.DateTimeFormat("id-ID",{day:"2-digit",month:"long",year:"numeric"}).format(new Date(t))}function n(t){return new Intl.DateTimeFormat("id-ID",{hour:"2-digit",minute:"2-digit"}).format(new Date(t))}function r(t){return`${a(t)}, ${n(t)}`}export{r as a,n as b,a as f};
