@@ -70,7 +70,7 @@ export function ReceiptPrint({ transaction, storeName = 'GreenPOS', storeAddress
 
     // Coba kirim via Gateway lokal terlebih dahulu
     try {
-      const res = await fetch('http://localhost:3001/api/send', {
+      const res = await fetch('http://127.0.0.1:3001/api/send', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ phone: waNumber, message, image: imageBase64 }),
@@ -86,6 +86,7 @@ export function ReceiptPrint({ transaction, storeName = 'GreenPOS', storeAddress
       throw new Error(json.error || 'Gateway error');
     } catch (err: any) {
       // Gateway tidak tersedia / error → fallback ke wa.me
+      console.error('[WA] Detailed Error:', err);
       console.warn('[WA] Gateway tidak tersedia, fallback ke wa.me:', err?.message);
     }
 
