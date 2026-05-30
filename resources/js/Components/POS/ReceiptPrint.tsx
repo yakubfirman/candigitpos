@@ -73,7 +73,10 @@ export function ReceiptPrint({ transaction, storeName = 'GreenPOS', storeAddress
       const engineUrl = app_settings?.wa_engine_url || 'http://127.0.0.1:3001';
       const res = await fetch(`${engineUrl}/api/send`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'ngrok-skip-browser-warning': '69420'
+        },
         body: JSON.stringify({ phone: waNumber, message, image: imageBase64 }),
         signal: AbortSignal.timeout(15000), // timeout 15 detik karena payload gambar lebih besar
       });
