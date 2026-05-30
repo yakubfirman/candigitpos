@@ -21,6 +21,7 @@ interface SettingsProps {
     store_logo?: string;
     store_icon?: string;
     theme_color?: string;
+    wa_engine_url?: string;
   };
   featureSettings: {
     feature_pos: boolean;
@@ -65,6 +66,7 @@ export default function SettingsIndex() {
     store_logo: null as File | null,
     store_icon: null as File | null,
     theme_color: settings.theme_color || 'green',
+    wa_engine_url: settings.wa_engine_url || 'http://127.0.0.1:3001',
   });
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -225,7 +227,19 @@ export default function SettingsIndex() {
                 </div>
                 
                 <hr className="border-stone-100 my-6" />
-                <h3 className="text-base font-semibold text-stone-800 mb-4">Pengaturan Struk Kasir</h3>
+                <h3 className="text-base font-semibold text-stone-800 mb-4">Pengaturan Struk Kasir & WhatsApp Engine</h3>
+
+                <div className="grid grid-cols-1 gap-6 mb-6">
+                  <Input
+                    label="Alamat (URL/IP) WA Engine"
+                    type="url"
+                    value={data.wa_engine_url}
+                    onChange={(e) => setData('wa_engine_url', e.target.value)}
+                    placeholder="https://domain-anda.ngrok-free.dev"
+                    hint="Alamat IP Lokal (contoh: http://192.168.1.10:3001) atau URL Ngrok (https://...) dari komputer kasir."
+                    error={errors.wa_engine_url}
+                  />
+                </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
                   <div className="flex flex-col gap-2">

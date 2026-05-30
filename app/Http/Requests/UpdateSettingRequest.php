@@ -34,6 +34,7 @@ class UpdateSettingRequest extends FormRequest
             'store_logo' => ['nullable', 'image', 'mimes:jpeg,png,jpg,svg', 'max:2048'],
             'store_icon' => ['nullable', 'image', 'mimes:jpeg,png,jpg,svg', 'max:2048'],
             'theme_color' => ['nullable', 'string', 'in:green,blue,violet,rose,orange,slate,teal'],
+            'wa_engine_url' => ['nullable', 'string', 'max:255'],
         ];
     }
 

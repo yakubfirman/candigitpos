@@ -70,7 +70,7 @@ export function ReceiptPrint({ transaction, storeName = 'GreenPOS', storeAddress
 
     // Coba kirim via Gateway lokal terlebih dahulu
     try {
-      const engineUrl = localStorage.getItem('wa_engine_url') || 'http://127.0.0.1:3001';
+      const engineUrl = app_settings?.wa_engine_url || 'http://127.0.0.1:3001';
       const res = await fetch(`${engineUrl}/api/send`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -224,31 +224,14 @@ export function ReceiptPrint({ transaction, storeName = 'GreenPOS', storeAddress
         </Button>
         {showWhatsapp && customerPhone && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-            <div style={{ display: 'flex', gap: '8px' }}>
-              <Button
-                onClick={() => handleSendWA(customerPhone)}
-                disabled={waSending}
-                className="flex-1 flex justify-center items-center gap-2 bg-[#25D366] hover:bg-[#1DA851] text-white border-transparent h-11 disabled:opacity-60"
-              >
-                <MessageCircle className="h-4 w-4" />
-                {waSending ? 'Mengirim...' : 'Kirim ke WhatsApp'}
-              </Button>
-              <Button
-                onClick={() => {
-                  const currentUrl = localStorage.getItem('wa_engine_url') || 'http://127.0.0.1:3001';
-                  const newUrl = window.prompt('Masukkan IP/URL WA Engine dari komputer kasir (contoh: http://192.168.1.10:3001)', currentUrl);
-                  if (newUrl) {
-                    localStorage.setItem('wa_engine_url', newUrl);
-                    alert('URL WA Engine berhasil disimpan! Silakan coba kirim ulang.');
-                  }
-                }}
-                variant="secondary"
-                className="h-11 px-3"
-                title="Pengaturan Jaringan WA Engine"
-              >
-                ⚙️
-              </Button>
-            </div>
+            <Button
+              onClick={() => handleSendWA(customerPhone)}
+              disabled={waSending}
+              className="w-full flex justify-center items-center gap-2 bg-[#25D366] hover:bg-[#1DA851] text-white border-transparent h-11 disabled:opacity-60"
+            >
+              <MessageCircle className="h-4 w-4" />
+              {waSending ? 'Mengirim...' : 'Kirim ke WhatsApp'}
+            </Button>
             {waFeedback === 'success' && (
               <p style={{ fontSize: '12px', textAlign: 'center', color: '#15803d', fontWeight: 600 }}>✅ Struk berhasil terkirim via Gateway!</p>
             )}

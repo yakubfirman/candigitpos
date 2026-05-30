@@ -64,6 +64,7 @@ class SettingController extends Controller
             'store_logo'     => $this->getSetting('store_logo', null),
             'store_icon'     => $this->getSetting('store_icon', null),
             'theme_color'    => $this->getSetting('theme_color', 'green'),
+            'wa_engine_url'  => $this->getSetting('wa_engine_url', 'http://127.0.0.1:3001'),
         ];
 
         $featureSettings = self::getFeatureSettings();
