@@ -121,10 +121,35 @@ export function ReceiptPrint({ transaction, storeName = 'GreenPOS', storeAddress
         ]
       });
 
-      const server = await device.gatt?.connect();
-      if (!server) throw new Error('Gagal menghubungkan ke perangkat GATT');
+      let server: BluetoothRemoteGATTServer | undefined = undefined;
+      
+      // Retry connection if it fails or disconnects immediately
+      for (let i = 0; i < 3; i++) {
+        try {
+          server = await device.gatt?.connect();
+          if (server?.connected) {
+            break;
+          }
+        } catch (e) {
+          console.warn('GATT connect attempt failed', e);
+        }
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
 
-      const services = await server.getPrimaryServices();
+      if (!server || !server.connected) {
+        throw new Error('Gagal menghubungkan ke perangkat GATT. Pastikan printer menyala dan coba lupakan (unpair) printer dari pengaturan Bluetooth HP Anda terlebih dahulu.');
+      }
+
+      // Beri sedikit jeda agar koneksi stabil sebelum mengambil service
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+      let services;
+      try {
+        services = await server.getPrimaryServices();
+      } catch (err) {
+        throw new Error('Koneksi terputus saat mengambil data printer. Coba matikan dan hidupkan lagi printer Anda.');
+      }
+
       let writeCharacteristic: BluetoothRemoteGATTCharacteristic | null = null;
       
       for (const service of services) {
