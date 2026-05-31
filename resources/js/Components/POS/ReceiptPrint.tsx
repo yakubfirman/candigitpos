@@ -23,10 +23,9 @@ export function ReceiptPrint({ transaction, storeName = 'GreenPOS', storeAddress
   const [isExporting, setIsExporting] = useState(false);
   const { app_settings } = usePage<any>().props;
 
-  // Paper size config
+  // Paper size config — RPP02N uses 55mm (5.5cm) paper, printable area ~48mm
   const is58mm = app_settings?.paper_size === '58';
-  // Printable area: 58mm paper = ~48mm printable, 80mm paper = ~72mm printable
-  const paperWidthMm = is58mm ? '58mm' : '80mm';
+  const paperWidthMm = is58mm ? '55mm' : '80mm';
   const printableWidthMm = is58mm ? '48mm' : '72mm';
 
   const handlePrint = () => {
@@ -102,23 +101,23 @@ export function ReceiptPrint({ transaction, storeName = 'GreenPOS', storeAddress
     setWaSending(false);
   };
 
-  // Font sizes — diperbesar agar terlihat jelas di printer thermal 58mm/80mm
+  // Font sizes — dioptimalkan untuk kertas 55mm (5.5cm) agar jelas terbaca
   const fs = {
-    storeName: is58mm ? '16px' : '20px',
-    address:   is58mm ? '11px' : '12px',
-    header:    is58mm ? '10px' : '11px',
-    invoice:   is58mm ? '12px' : '13px',
-    timestamp: is58mm ? '10px' : '11px',
-    badge:     is58mm ? '10px' : '11px',
-    itemName:  is58mm ? '12px' : '13px',
-    itemQty:   is58mm ? '11px' : '12px',
-    label:     is58mm ? '11px' : '12px',
-    value:     is58mm ? '11px' : '12px',
-    total:     is58mm ? '14px' : '16px',
-    footer:    is58mm ? '10px' : '11px',
+    storeName: is58mm ? '14px' : '20px',
+    address:   is58mm ? '9px'  : '12px',
+    header:    is58mm ? '8px'  : '11px',
+    invoice:   is58mm ? '10px' : '13px',
+    timestamp: is58mm ? '9px'  : '11px',
+    badge:     is58mm ? '9px'  : '11px',
+    itemName:  is58mm ? '10px' : '13px',
+    itemQty:   is58mm ? '9px'  : '12px',
+    label:     is58mm ? '9px'  : '12px',
+    value:     is58mm ? '9px'  : '12px',
+    total:     is58mm ? '12px' : '16px',
+    footer:    is58mm ? '8px'  : '11px',
   };
 
-  const pad = is58mm ? '3mm' : '4mm';
+  const pad = is58mm ? '2mm' : '4mm';
 
   const [mounted, setMounted] = useState(false);
   useEffect(() => {
