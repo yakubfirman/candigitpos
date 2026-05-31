@@ -117,37 +117,49 @@ export function ReceiptPrint({ transaction, storeName = 'GreenPOS', storeAddress
         optionalServices: [
           '000018f0-0000-1000-8000-00805f9b34fb', 
           'e7810a71-73ae-499d-8c15-faa9aef0c3f2',
-          '49535343-fe7d-4ae5-8fa9-9fafd205e455'
+          '49535343-fe7d-4ae5-8fa9-9fafd205e455',
+          '0000fff0-0000-1000-8000-00805f9b34fb',
+          '0000ff00-0000-1000-8000-00805f9b34fb',
+          '0000af30-0000-1000-8000-00805f9b34fb'
         ]
       });
 
-      let server: BluetoothRemoteGATTServer | undefined = undefined;
+      if (!device.gatt) throw new Error('GATT tidak didukung di perangkat ini.');
+
+      let server: BluetoothRemoteGATTServer | undefined = device.gatt;
       
-      // Retry connection if it fails or disconnects immediately
+      // Fungsi pembantu untuk koneksi dengan jeda
+      const connectPrinter = async () => {
+        await server?.connect();
+        await new Promise(resolve => setTimeout(resolve, 1500)); // Jeda 1.5 detik sangat penting untuk Android
+      };
+
+      // Coba hubungkan maksimal 3x jika terputus
+      let connected = false;
       for (let i = 0; i < 3; i++) {
         try {
-          server = await device.gatt?.connect();
+          await connectPrinter();
           if (server?.connected) {
+            connected = true;
             break;
           }
         } catch (e) {
-          console.warn('GATT connect attempt failed', e);
+          console.warn('GATT connect try ' + (i+1) + ' failed', e);
         }
-        await new Promise(resolve => setTimeout(resolve, 500));
       }
 
-      if (!server || !server.connected) {
-        throw new Error('Gagal menghubungkan ke perangkat GATT. Pastikan printer menyala dan coba lupakan (unpair) printer dari pengaturan Bluetooth HP Anda terlebih dahulu.');
+      if (!connected || !server?.connected) {
+        throw new Error('Gagal menghubungkan ke perangkat GATT. Pastikan printer menyala dan lupakan (unpair) dari pengaturan Bluetooth HP Anda.');
       }
-
-      // Beri sedikit jeda agar koneksi stabil sebelum mengambil service
-      await new Promise(resolve => setTimeout(resolve, 500));
 
       let services;
       try {
         services = await server.getPrimaryServices();
-      } catch (err) {
-        throw new Error('Koneksi terputus saat mengambil data printer. Coba matikan dan hidupkan lagi printer Anda.');
+      } catch (err: any) {
+        // Jika gagal mengambil service (seringkali karena tiba-tiba disconnected), coba sekali lagi
+        console.warn('Gagal ambil service, mencoba reconnect...', err);
+        await connectPrinter();
+        services = await server.getPrimaryServices();
       }
 
       let writeCharacteristic: BluetoothRemoteGATTCharacteristic | null = null;
