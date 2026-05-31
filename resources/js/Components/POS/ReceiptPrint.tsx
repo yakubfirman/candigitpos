@@ -4,8 +4,7 @@ import type { Transaction } from '@/Types/transaction';
 import { formatRupiah } from '@/Utils/currency';
 import { formatTanggalWaktu } from '@/Utils/date';
 import { Button } from '@/Components/UI/Button';
-import { Printer, MessageCircle, Bluetooth, CheckCircle } from 'lucide-react';
-import { EscPosBuilder } from '@/Utils/escpos';
+import { Printer, MessageCircle, CheckCircle } from 'lucide-react';
 import html2canvas from 'html2canvas';
 import { usePage } from '@inertiajs/react';
 
@@ -24,10 +23,11 @@ export function ReceiptPrint({ transaction, storeName = 'GreenPOS', storeAddress
   const [isExporting, setIsExporting] = useState(false);
   const { app_settings } = usePage<any>().props;
 
-  // Paper width in pixels: 58mm ≈ 219px, 80mm ≈ 302px at 96dpi
+  // Paper size config
   const is58mm = app_settings?.paper_size === '58';
-  const paperWidthPx = is58mm ? 219 : 302;
+  // Printable area: 58mm paper = ~48mm printable, 80mm paper = ~72mm printable
   const paperWidthMm = is58mm ? '58mm' : '80mm';
+  const printableWidthMm = is58mm ? '48mm' : '72mm';
 
   const handlePrint = () => {
     window.print();
@@ -102,199 +102,23 @@ export function ReceiptPrint({ transaction, storeName = 'GreenPOS', storeAddress
     setWaSending(false);
   };
 
-  const [btStatus, setBtStatus] = useState<'idle'|'connecting'|'printing'|'success'|'error'>('idle');
-
-  const handleBluetoothPrint = async () => {
-    try {
-      setBtStatus('connecting');
-      if (!navigator.bluetooth) {
-        throw new Error('Web Bluetooth API tidak didukung di browser ini. Gunakan Google Chrome versi terbaru.');
-      }
-
-      // Meminta pengguna memilih perangkat bluetooth (Printer)
-      const device = await navigator.bluetooth.requestDevice({
-        acceptAllDevices: true,
-        optionalServices: [
-          '000018f0-0000-1000-8000-00805f9b34fb', 
-          'e7810a71-73ae-499d-8c15-faa9aef0c3f2',
-          '49535343-fe7d-4ae5-8fa9-9fafd205e455',
-          '0000fff0-0000-1000-8000-00805f9b34fb',
-          '0000ff00-0000-1000-8000-00805f9b34fb',
-          '0000af30-0000-1000-8000-00805f9b34fb'
-        ]
-      });
-
-      if (!device.gatt) throw new Error('GATT tidak didukung di perangkat ini.');
-
-      let server: BluetoothRemoteGATTServer | undefined = device.gatt;
-      
-      // Fungsi pembantu untuk koneksi dengan jeda
-      const connectPrinter = async () => {
-        await server?.connect();
-        await new Promise(resolve => setTimeout(resolve, 1500)); // Jeda 1.5 detik sangat penting untuk Android
-      };
-
-      // Coba hubungkan maksimal 3x jika terputus
-      let connected = false;
-      for (let i = 0; i < 3; i++) {
-        try {
-          await connectPrinter();
-          if (server?.connected) {
-            connected = true;
-            break;
-          }
-        } catch (e) {
-          console.warn('GATT connect try ' + (i+1) + ' failed', e);
-        }
-      }
-
-      if (!connected || !server?.connected) {
-        throw new Error('Gagal menghubungkan ke perangkat GATT. Pastikan printer menyala dan lupakan (unpair) dari pengaturan Bluetooth HP Anda.');
-      }
-
-      let services;
-      try {
-        services = await server.getPrimaryServices();
-      } catch (err: any) {
-        // Jika gagal mengambil service (seringkali karena tiba-tiba disconnected), coba sekali lagi
-        console.warn('Gagal ambil service, mencoba reconnect...', err);
-        await connectPrinter();
-        services = await server.getPrimaryServices();
-      }
-
-      let writeCharacteristic: BluetoothRemoteGATTCharacteristic | null = null;
-      
-      for (const service of services) {
-        const characteristics = await service.getCharacteristics();
-        for (const char of characteristics) {
-          if (char.properties.write || char.properties.writeWithoutResponse) {
-            writeCharacteristic = char;
-            break;
-          }
-        }
-        if (writeCharacteristic) break;
-      }
-
-      if (!writeCharacteristic) {
-        throw new Error('Tidak ditemukan endpoint (characteristic) untuk menulis data ke printer ini.');
-      }
-
-      setBtStatus('printing');
-
-      // Generate ESC/POS Data
-      const builder = new EscPosBuilder();
-      const printWidth = is58mm ? 32 : 48; // jumlah karakter max per baris (perkiraan)
-
-      builder.alignCenter();
-      builder.bold(true);
-      builder.setSize(2, 2);
-      builder.textLine(app_settings?.store_name || storeName);
-      builder.setSize(1, 1);
-      builder.bold(false);
-      builder.textLine(app_settings?.store_address || storeAddress);
-      
-      if (app_settings?.receipt_header) {
-        builder.textLine(app_settings.receipt_header);
-      }
-      builder.newline();
-
-      builder.separator('-', printWidth);
-      builder.alignCenter();
-      builder.textLine(transaction.invoice_number);
-      builder.textLine(transaction.order_type === 'take_away' ? 'TAKE-AWAY' : 'DINE-IN');
-      builder.textLine(formatTanggalWaktu(transaction.created_at));
-      
-      if (transaction.customer_name || transaction.table_number) {
-        let custLine = '';
-        if (transaction.customer_name) custLine += transaction.customer_name;
-        if (transaction.customer_name && transaction.table_number) custLine += ' | ';
-        if (transaction.table_number) custLine += 'Meja ' + transaction.table_number;
-        builder.textLine(custLine);
-      }
-      builder.separator('-', printWidth);
-      builder.alignLeft();
-
-      // Items
-      transaction.items.forEach((item: any) => {
-        builder.textLine(item.product_name);
-        const qtyPrice = `${item.quantity} x ${formatRupiah(item.product_price)}`;
-        builder.justify(qtyPrice, formatRupiah(item.subtotal), printWidth);
-      });
-      builder.separator('-', printWidth);
-
-      // Totals
-      builder.justify('Subtotal', formatRupiah(transaction.subtotal), printWidth);
-      if (transaction.discount_amount > 0) {
-        builder.justify('Diskon', '-' + formatRupiah(transaction.discount_amount), printWidth);
-      }
-      if (transaction.tax_amount > 0) {
-        builder.justify('Pajak', formatRupiah(transaction.tax_amount), printWidth);
-      }
-      builder.separator('=', printWidth);
-      
-      builder.bold(true);
-      builder.justify('TOTAL', formatRupiah(transaction.total), printWidth);
-      builder.bold(false);
-      
-      builder.newline();
-      builder.justify('Metode Bayar', transaction.payment_method.toUpperCase(), printWidth);
-      builder.justify('Tunai/Bayar', formatRupiah(Number(transaction.amount_paid)), printWidth);
-      if (Number(transaction.change_amount) > 0) {
-        builder.bold(true);
-        builder.justify('KEMBALI', formatRupiah(Number(transaction.change_amount)), printWidth);
-        builder.bold(false);
-      }
-      builder.newline();
-
-      if (transaction.notes) {
-        builder.alignCenter();
-        builder.textLine(`"${transaction.notes}"`);
-        builder.newline();
-      }
-
-      builder.alignCenter();
-      builder.textLine(app_settings?.receipt_footer || 'Terima kasih atas kunjungan Anda!');
-      
-      // Feed paper and optionally cut
-      builder.feed(4);
-      builder.cut();
-
-      // Send to printer in chunks
-      const data = builder.getBytes();
-      const CHUNK_SIZE = 100; // max usually ~512 bytes for Bluetooth LE, 100 is safe
-      for (let i = 0; i < data.length; i += CHUNK_SIZE) {
-        const chunk = data.slice(i, i + CHUNK_SIZE);
-        await writeCharacteristic.writeValue(chunk);
-      }
-
-      setBtStatus('success');
-      setTimeout(() => setBtStatus('idle'), 3000);
-      
-    } catch (err: any) {
-      console.error('Bluetooth Print Error:', err);
-      alert('Gagal mencetak via Bluetooth: ' + err.message);
-      setBtStatus('error');
-    }
-  };
-
-
-  // Font sizes (smaller for 58mm)
+  // Font sizes — diperbesar agar terlihat jelas di printer thermal 58mm/80mm
   const fs = {
-    storeName: is58mm ? '13px' : '15px',
-    address: is58mm ? '9px' : '10px',
-    header: is58mm ? '8px' : '9px',
-    invoice: is58mm ? '10px' : '11px',
-    timestamp: is58mm ? '8px' : '9px',
-    badge: is58mm ? '8px' : '9px',
-    itemName: is58mm ? '10px' : '11px',
-    itemQty: is58mm ? '9px' : '10px',
-    label: is58mm ? '9px' : '10px',
-    value: is58mm ? '9px' : '10px',
-    total: is58mm ? '12px' : '14px',
-    footer: is58mm ? '8px' : '9px',
+    storeName: is58mm ? '16px' : '20px',
+    address:   is58mm ? '11px' : '12px',
+    header:    is58mm ? '10px' : '11px',
+    invoice:   is58mm ? '12px' : '13px',
+    timestamp: is58mm ? '10px' : '11px',
+    badge:     is58mm ? '10px' : '11px',
+    itemName:  is58mm ? '12px' : '13px',
+    itemQty:   is58mm ? '11px' : '12px',
+    label:     is58mm ? '11px' : '12px',
+    value:     is58mm ? '11px' : '12px',
+    total:     is58mm ? '14px' : '16px',
+    footer:    is58mm ? '10px' : '11px',
   };
 
-  const pad = is58mm ? '12px' : '16px';
+  const pad = is58mm ? '3mm' : '4mm';
 
   const [mounted, setMounted] = useState(false);
   useEffect(() => {
@@ -303,11 +127,24 @@ export function ReceiptPrint({ transaction, storeName = 'GreenPOS', storeAddress
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%' }}>
-      {/* Dynamic print styles */}
+      {/* Dynamic print styles — optimized for thermal printer */}
       <style>{`
         @media print {
+          html, body {
+            margin: 0 !important;
+            padding: 0 !important;
+            width: ${paperWidthMm} !important;
+          }
           body > *:not(#receipt-print-portal) { display: none !important; }
-          #receipt-print-portal { display: block !important; position: static !important; }
+          #receipt-print-portal {
+            display: block !important;
+            position: static !important;
+            width: ${paperWidthMm} !important;
+          }
+          #receipt-print-portal * {
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+          }
           @page {
             size: ${paperWidthMm} auto;
             margin: 0;
@@ -323,18 +160,18 @@ export function ReceiptPrint({ transaction, storeName = 'GreenPOS', storeAddress
         }
       `}</style>
 
-      {/* Hidden portal for printing only — exact paper width */}
+      {/* Hidden portal for printing only — uses mm units to match thermal paper exactly */}
       {mounted && typeof document !== 'undefined' ? createPortal(
         <div id="receipt-print-portal">
           <div style={{
-            width: `${paperWidthPx}px`,
+            width: printableWidthMm,
+            maxWidth: paperWidthMm,
             fontFamily: "'Courier New', Courier, monospace",
             backgroundColor: '#fff',
-            color: '#111',
+            color: '#000',
             padding: pad,
             boxSizing: 'border-box',
             position: 'relative',
-            borderBottom: '4px dashed #e5e7eb', // Efek struk robek di bawah
             margin: '0 auto',
           }}>
             {/* Watermark LUNAS */}
@@ -345,7 +182,7 @@ export function ReceiptPrint({ transaction, storeName = 'GreenPOS', storeAddress
               transform: 'translate(-50%, -50%) rotate(-30deg)',
               fontSize: is58mm ? '48px' : '72px',
               fontWeight: 900,
-              color: 'rgba(34, 197, 94, 0.10)', // Hijau sangat transparan
+              color: 'rgba(34, 197, 94, 0.10)',
               border: is58mm ? '6px solid rgba(34, 197, 94, 0.10)' : '10px solid rgba(34, 197, 94, 0.10)',
               borderRadius: '16px',
               padding: '10px 20px',
@@ -406,15 +243,7 @@ export function ReceiptPrint({ transaction, storeName = 'GreenPOS', storeAddress
       {/* Action Buttons */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', width: '100%' }}>
         <Button onClick={handlePrint} variant="primary" className="w-full flex justify-center items-center gap-2 h-11">
-          <Printer className="h-4 w-4" /> Cetak (Browser)
-        </Button>
-        <Button 
-          onClick={handleBluetoothPrint} 
-          disabled={btStatus === 'connecting' || btStatus === 'printing'}
-          className="w-full flex justify-center items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white border-transparent h-11 disabled:opacity-60"
-        >
-          <Bluetooth className="h-4 w-4" /> 
-          {btStatus === 'connecting' ? 'Menghubungkan...' : btStatus === 'printing' ? 'Mencetak...' : 'Cetak via Bluetooth'}
+          <Printer className="h-4 w-4" /> Cetak Struk
         </Button>
         {showWhatsapp && customerPhone && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
@@ -463,50 +292,50 @@ function ReceiptContent({ transaction, storeName, storeAddress, app_settings, fs
             alt="Logo"
             style={{ 
               width: 'auto', 
-              maxWidth: is58mm ? '130px' : '180px', 
+              maxWidth: is58mm ? '35mm' : '50mm', 
               height: 'auto', 
-              maxHeight: is58mm ? '55px' : '70px', 
+              maxHeight: is58mm ? '15mm' : '20mm', 
               objectFit: 'contain', 
-              margin: '0 auto 10px', 
+              margin: '0 auto 8px', 
               display: 'block', 
-              filter: 'grayscale(1) contrast(1.2)' 
+              filter: 'grayscale(1) contrast(1.3)' 
             }}
           />
         )}
-        <div style={{ fontSize: is58mm ? '15px' : '18px', fontWeight: 900, letterSpacing: '0.05em', textTransform: 'uppercase' }}>
+        <div style={{ fontSize: fs.storeName, fontWeight: 900, letterSpacing: '0.05em', textTransform: 'uppercase', color: '#000' }}>
           {displayStoreName}
         </div>
         {displayAddress && (
-          <div style={{ fontSize: fs.address, color: '#555', marginTop: '2px', lineHeight: 1.4 }}>
+          <div style={{ fontSize: fs.address, color: '#333', marginTop: '2px', lineHeight: 1.4 }}>
             {displayAddress}
           </div>
         )}
         {app_settings?.receipt_header && (
-          <div style={{ fontSize: fs.header, fontWeight: 600, marginTop: '4px', whiteSpace: 'pre-wrap' }}>
+          <div style={{ fontSize: fs.header, fontWeight: 600, marginTop: '4px', whiteSpace: 'pre-wrap', color: '#333' }}>
             {app_settings.receipt_header}
           </div>
         )}
       </div>
 
       {/* Divider */}
-      <div style={{ borderTop: '2px dotted #555', borderBottom: '2px dotted #555', padding: '6px 0', textAlign: 'center', margin: '12px 0 10px' }}>
-        <div style={{ fontSize: fs.invoice, fontWeight: 700, letterSpacing: '0.06em' }}>{transaction.invoice_number}</div>
-        <div style={{ display: 'inline-block', padding: '2px 0', fontSize: fs.badge, fontWeight: 700, marginTop: '5px', letterSpacing: '0.05em' }}>
+      <div style={{ borderTop: '2px dashed #000', borderBottom: '2px dashed #000', padding: '6px 0', textAlign: 'center', margin: '10px 0' }}>
+        <div style={{ fontSize: fs.invoice, fontWeight: 800, letterSpacing: '0.06em', color: '#000' }}>{transaction.invoice_number}</div>
+        <div style={{ display: 'inline-block', padding: '2px 0', fontSize: fs.badge, fontWeight: 800, marginTop: '4px', letterSpacing: '0.05em', color: '#000' }}>
           {transaction.order_type === 'take_away' ? 'TAKE-AWAY' : 'DINE-IN'}
         </div>
-        <div style={{ fontSize: fs.timestamp, color: '#666', marginTop: '6px' }}>{formatTanggalWaktu(transaction.created_at)}</div>
+        <div style={{ fontSize: fs.timestamp, color: '#333', marginTop: '4px', fontWeight: 600 }}>{formatTanggalWaktu(transaction.created_at)}</div>
         {(transaction.customer_name || transaction.table_number) && (
-          <div style={{ display: 'flex', justifyContent: 'center', gap: '8px', marginTop: '5px', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', justifyContent: 'center', gap: '6px', marginTop: '4px', flexWrap: 'wrap' }}>
             {transaction.customer_name && (
-              <span style={{ fontSize: fs.badge, fontWeight: 600 }}>
+              <span style={{ fontSize: fs.badge, fontWeight: 700, color: '#000' }}>
                 {transaction.customer_name}
               </span>
             )}
             {transaction.customer_name && transaction.table_number && (
-              <span style={{ fontSize: fs.badge, color: '#888' }}>|</span>
+              <span style={{ fontSize: fs.badge, color: '#555' }}>|</span>
             )}
             {transaction.table_number && (
-              <span style={{ fontSize: fs.badge, fontWeight: 600 }}>
+              <span style={{ fontSize: fs.badge, fontWeight: 700, color: '#000' }}>
                 Meja {transaction.table_number}
               </span>
             )}
@@ -515,16 +344,16 @@ function ReceiptContent({ transaction, storeName, storeAddress, app_settings, fs
       </div>
 
       {/* Items */}
-      <div style={{ marginBottom: '10px' }}>
+      <div style={{ marginBottom: '8px' }}>
         {transaction.items.map((item) => (
           <div key={item.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '6px' }}>
-            <div style={{ flex: 1, paddingRight: '8px' }}>
-              <div style={{ fontSize: fs.itemName, fontWeight: 700 }}>{item.product_name}</div>
-              <div style={{ fontSize: fs.itemQty, color: '#555' }}>
+            <div style={{ flex: 1, paddingRight: '6px' }}>
+              <div style={{ fontSize: fs.itemName, fontWeight: 800, color: '#000' }}>{item.product_name}</div>
+              <div style={{ fontSize: fs.itemQty, color: '#333', fontWeight: 600 }}>
                 {item.quantity} x {formatRupiah(item.product_price)}
               </div>
             </div>
-            <div style={{ fontSize: fs.itemName, fontWeight: 700, whiteSpace: 'nowrap' }}>
+            <div style={{ fontSize: fs.itemName, fontWeight: 800, whiteSpace: 'nowrap', color: '#000' }}>
               {formatRupiah(item.subtotal)}
             </div>
           </div>
@@ -532,66 +361,66 @@ function ReceiptContent({ transaction, storeName, storeAddress, app_settings, fs
       </div>
 
       {/* Totals */}
-      <div style={{ borderTop: '1.5px dashed #aaa', paddingTop: '8px' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: fs.label, color: '#555', marginBottom: '4px' }}>
-          <span>Subtotal</span><span style={{ color: '#111' }}>{formatRupiah(transaction.subtotal)}</span>
+      <div style={{ borderTop: '1.5px dashed #000', paddingTop: '6px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: fs.label, color: '#333', marginBottom: '3px', fontWeight: 600 }}>
+          <span>Subtotal</span><span style={{ color: '#000' }}>{formatRupiah(transaction.subtotal)}</span>
         </div>
         {transaction.discount_amount > 0 && (
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: fs.label, marginBottom: '4px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: fs.label, marginBottom: '3px', fontWeight: 600, color: '#333' }}>
             <span>Diskon</span><span>-{formatRupiah(transaction.discount_amount)}</span>
           </div>
         )}
         {transaction.tax_amount > 0 && (
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: fs.label, color: '#555', marginBottom: '4px' }}>
-            <span>Pajak</span><span style={{ color: '#111' }}>{formatRupiah(transaction.tax_amount)}</span>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: fs.label, color: '#333', marginBottom: '3px', fontWeight: 600 }}>
+            <span>Pajak</span><span style={{ color: '#000' }}>{formatRupiah(transaction.tax_amount)}</span>
           </div>
         )}
         {/* TOTAL bar */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: fs.total, fontWeight: 900, borderTop: '2px solid #111', marginTop: '6px', paddingTop: '6px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: fs.total, fontWeight: 900, borderTop: '2px solid #000', marginTop: '4px', paddingTop: '5px', color: '#000' }}>
           <span>TOTAL</span><span>{formatRupiah(transaction.total)}</span>
         </div>
-        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: fs.label, borderTop: '1px solid #ddd', marginTop: '6px', paddingTop: '6px', color: '#555' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: fs.label, borderTop: '1px dashed #000', marginTop: '5px', paddingTop: '5px', color: '#333', fontWeight: 600 }}>
           <span>Metode Bayar</span>
-          <span style={{ fontWeight: 700, textTransform: 'uppercase', color: '#111' }}>{transaction.payment_method}</span>
+          <span style={{ fontWeight: 800, textTransform: 'uppercase', color: '#000' }}>{transaction.payment_method}</span>
         </div>
-        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: fs.label, marginTop: '4px', color: '#555' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: fs.label, marginTop: '3px', color: '#333', fontWeight: 600 }}>
           <span>Tunai/Bayar</span>
-          <span style={{ color: '#111', fontWeight: 600 }}>{formatRupiah(Number(transaction.amount_paid))}</span>
+          <span style={{ color: '#000', fontWeight: 700 }}>{formatRupiah(Number(transaction.amount_paid))}</span>
         </div>
         {Number(transaction.change_amount) > 0 && (
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: fs.label, fontWeight: 700, marginTop: '4px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: fs.label, fontWeight: 800, marginTop: '3px', color: '#000' }}>
             <span>KEMBALI</span><span>{formatRupiah(Number(transaction.change_amount))}</span>
           </div>
         )}
       </div>
 
       {/* Pseudo Barcode / Invoice Number */}
-      <div style={{ margin: '16px auto 10px', textAlign: 'center' }}>
+      <div style={{ margin: '12px auto 8px', textAlign: 'center' }}>
         <div style={{ 
           display: 'inline-block', 
-          height: is58mm ? '30px' : '40px', 
+          height: is58mm ? '25px' : '35px', 
           width: '85%', 
-          background: 'repeating-linear-gradient(to right, #111, #111 2px, transparent 2px, transparent 4px, #111 4px, #111 5px, transparent 5px, transparent 8px, #111 8px, #111 11px, transparent 11px, transparent 13px, #111 13px, #111 14px, transparent 14px, transparent 17px)' 
+          background: 'repeating-linear-gradient(to right, #000, #000 2px, transparent 2px, transparent 4px, #000 4px, #000 5px, transparent 5px, transparent 8px, #000 8px, #000 11px, transparent 11px, transparent 13px, #000 13px, #000 14px, transparent 14px, transparent 17px)' 
         }} />
-        <div style={{ fontSize: fs.header, marginTop: '4px', letterSpacing: '0.25em', fontWeight: 600 }}>
+        <div style={{ fontSize: fs.header, marginTop: '3px', letterSpacing: '0.2em', fontWeight: 700, color: '#000' }}>
           {transaction.invoice_number}
         </div>
       </div>
 
       {/* Notes */}
       {transaction.notes && (
-        <div style={{ borderTop: '1.5px dashed #aaa', marginTop: '10px', paddingTop: '8px', textAlign: 'center', fontSize: fs.footer, color: '#666', fontStyle: 'italic' }}>
+        <div style={{ borderTop: '1.5px dashed #000', marginTop: '8px', paddingTop: '6px', textAlign: 'center', fontSize: fs.footer, color: '#333', fontStyle: 'italic', fontWeight: 600 }}>
           "{transaction.notes}"
         </div>
       )}
 
       {/* Footer */}
-      <div style={{ marginTop: '12px', textAlign: 'center', fontSize: fs.footer, color: '#888', lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>
+      <div style={{ marginTop: '10px', textAlign: 'center', fontSize: fs.footer, color: '#555', lineHeight: 1.5, whiteSpace: 'pre-wrap', fontWeight: 600 }}>
         {app_settings?.receipt_footer || 'Terima kasih atas kunjungan Anda!\nBarang yang sudah dibeli tidak dapat ditukar/dikembalikan.'}
       </div>
 
       {/* Bottom decorative line */}
-      <div style={{ marginTop: '12px', borderTop: '1.5px dashed #aaa' }} />
+      <div style={{ marginTop: '10px', borderTop: '1.5px dashed #000' }} />
     </>
   );
 }
