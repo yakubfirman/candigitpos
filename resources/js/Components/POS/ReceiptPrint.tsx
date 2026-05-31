@@ -159,49 +159,25 @@ export function ReceiptPrint({ transaction, storeName = 'GreenPOS', storeAddress
         }
       `}</style>
 
-      {/* Hidden portal for printing only — uses mm units to match thermal paper exactly */}
+      {/* Hidden portal for printing only */}
       {mounted && typeof document !== 'undefined' ? createPortal(
         <div id="receipt-print-portal">
           <div style={{
-            width: printableWidthMm,
-            maxWidth: paperWidthMm,
+            width: '100%',
             fontFamily: "'Courier New', Courier, monospace",
             backgroundColor: '#fff',
             color: '#000',
-            padding: pad,
+            padding: '0 1mm',
             boxSizing: 'border-box',
-            position: 'relative',
-            margin: '0 auto',
           }}>
-            {/* Watermark LUNAS */}
-            <div style={{
-              position: 'absolute',
-              top: '40%',
-              left: '50%',
-              transform: 'translate(-50%, -50%) rotate(-30deg)',
-              fontSize: is58mm ? '48px' : '72px',
-              fontWeight: 900,
-              color: 'rgba(34, 197, 94, 0.10)',
-              border: is58mm ? '6px solid rgba(34, 197, 94, 0.10)' : '10px solid rgba(34, 197, 94, 0.10)',
-              borderRadius: '16px',
-              padding: '10px 20px',
-              pointerEvents: 'none',
-              zIndex: 0,
-              letterSpacing: '0.1em'
-            }}>
-              LUNAS
-            </div>
-            
-            <div style={{ position: 'relative', zIndex: 1 }}>
-              <ReceiptContent
-                transaction={transaction}
-                storeName={storeName}
-                storeAddress={storeAddress}
-                app_settings={app_settings}
-                fs={fs}
-                is58mm={is58mm}
-              />
-            </div>
+            <ReceiptContent
+              transaction={transaction}
+              storeName={storeName}
+              storeAddress={storeAddress}
+              app_settings={app_settings}
+              fs={fs}
+              is58mm={is58mm}
+            />
           </div>
         </div>,
         document.body
@@ -305,12 +281,12 @@ function ReceiptContent({ transaction, storeName, storeAddress, app_settings, fs
           {displayStoreName}
         </div>
         {displayAddress && (
-          <div style={{ fontSize: fs.address, color: '#333', marginTop: '2px', lineHeight: 1.4 }}>
+          <div style={{ fontSize: fs.address, color: '#000', marginTop: '2px', lineHeight: 1.4, fontWeight: 700 }}>
             {displayAddress}
           </div>
         )}
         {app_settings?.receipt_header && (
-          <div style={{ fontSize: fs.header, fontWeight: 600, marginTop: '4px', whiteSpace: 'pre-wrap', color: '#333' }}>
+          <div style={{ fontSize: fs.header, fontWeight: 700, marginTop: '4px', whiteSpace: 'pre-wrap', color: '#000' }}>
             {app_settings.receipt_header}
           </div>
         )}
@@ -322,7 +298,7 @@ function ReceiptContent({ transaction, storeName, storeAddress, app_settings, fs
         <div style={{ display: 'inline-block', padding: '2px 0', fontSize: fs.badge, fontWeight: 800, marginTop: '4px', letterSpacing: '0.05em', color: '#000' }}>
           {transaction.order_type === 'take_away' ? 'TAKE-AWAY' : 'DINE-IN'}
         </div>
-        <div style={{ fontSize: fs.timestamp, color: '#333', marginTop: '4px', fontWeight: 600 }}>{formatTanggalWaktu(transaction.created_at)}</div>
+        <div style={{ fontSize: fs.timestamp, color: '#000', marginTop: '4px', fontWeight: 700 }}>{formatTanggalWaktu(transaction.created_at)}</div>
         {(transaction.customer_name || transaction.table_number) && (
           <div style={{ display: 'flex', justifyContent: 'center', gap: '6px', marginTop: '4px', flexWrap: 'wrap' }}>
             {transaction.customer_name && (
@@ -361,33 +337,33 @@ function ReceiptContent({ transaction, storeName, storeAddress, app_settings, fs
 
       {/* Totals */}
       <div style={{ borderTop: '1.5px dashed #000', paddingTop: '6px' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: fs.label, color: '#333', marginBottom: '3px', fontWeight: 600 }}>
-          <span>Subtotal</span><span style={{ color: '#000' }}>{formatRupiah(transaction.subtotal)}</span>
+        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: fs.label, color: '#000', marginBottom: '3px', fontWeight: 700 }}>
+          <span>Subtotal</span><span>{formatRupiah(transaction.subtotal)}</span>
         </div>
         {transaction.discount_amount > 0 && (
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: fs.label, marginBottom: '3px', fontWeight: 600, color: '#333' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: fs.label, marginBottom: '3px', fontWeight: 700, color: '#000' }}>
             <span>Diskon</span><span>-{formatRupiah(transaction.discount_amount)}</span>
           </div>
         )}
         {transaction.tax_amount > 0 && (
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: fs.label, color: '#333', marginBottom: '3px', fontWeight: 600 }}>
-            <span>Pajak</span><span style={{ color: '#000' }}>{formatRupiah(transaction.tax_amount)}</span>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: fs.label, color: '#000', marginBottom: '3px', fontWeight: 700 }}>
+            <span>Pajak</span><span>{formatRupiah(transaction.tax_amount)}</span>
           </div>
         )}
         {/* TOTAL bar */}
         <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: fs.total, fontWeight: 900, borderTop: '2px solid #000', marginTop: '4px', paddingTop: '5px', color: '#000' }}>
           <span>TOTAL</span><span>{formatRupiah(transaction.total)}</span>
         </div>
-        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: fs.label, borderTop: '1px dashed #000', marginTop: '5px', paddingTop: '5px', color: '#333', fontWeight: 600 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: fs.label, borderTop: '1px dashed #000', marginTop: '5px', paddingTop: '5px', color: '#000', fontWeight: 700 }}>
           <span>Metode Bayar</span>
-          <span style={{ fontWeight: 800, textTransform: 'uppercase', color: '#000' }}>{transaction.payment_method}</span>
+          <span style={{ fontWeight: 900, textTransform: 'uppercase' }}>{transaction.payment_method}</span>
         </div>
-        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: fs.label, marginTop: '3px', color: '#333', fontWeight: 600 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: fs.label, marginTop: '3px', color: '#000', fontWeight: 700 }}>
           <span>Tunai/Bayar</span>
-          <span style={{ color: '#000', fontWeight: 700 }}>{formatRupiah(Number(transaction.amount_paid))}</span>
+          <span style={{ fontWeight: 800 }}>{formatRupiah(Number(transaction.amount_paid))}</span>
         </div>
         {Number(transaction.change_amount) > 0 && (
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: fs.label, fontWeight: 800, marginTop: '3px', color: '#000' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: fs.label, fontWeight: 900, marginTop: '3px', color: '#000' }}>
             <span>KEMBALI</span><span>{formatRupiah(Number(transaction.change_amount))}</span>
           </div>
         )}
@@ -408,13 +384,13 @@ function ReceiptContent({ transaction, storeName, storeAddress, app_settings, fs
 
       {/* Notes */}
       {transaction.notes && (
-        <div style={{ borderTop: '1.5px dashed #000', marginTop: '8px', paddingTop: '6px', textAlign: 'center', fontSize: fs.footer, color: '#333', fontStyle: 'italic', fontWeight: 600 }}>
+        <div style={{ borderTop: '1.5px dashed #000', marginTop: '8px', paddingTop: '6px', textAlign: 'center', fontSize: fs.footer, color: '#000', fontStyle: 'italic', fontWeight: 700 }}>
           "{transaction.notes}"
         </div>
       )}
 
       {/* Footer */}
-      <div style={{ marginTop: '10px', textAlign: 'center', fontSize: fs.footer, color: '#555', lineHeight: 1.5, whiteSpace: 'pre-wrap', fontWeight: 600 }}>
+      <div style={{ marginTop: '10px', textAlign: 'center', fontSize: fs.footer, color: '#000', lineHeight: 1.5, whiteSpace: 'pre-wrap', fontWeight: 700 }}>
         {app_settings?.receipt_footer || 'Terima kasih atas kunjungan Anda!\nBarang yang sudah dibeli tidak dapat ditukar/dikembalikan.'}
       </div>
 
