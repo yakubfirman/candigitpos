@@ -1,9 +1,11 @@
-import { useRef, useState } from 'react';
+import { useRef, useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import type { Transaction } from '@/Types/transaction';
 import { formatRupiah } from '@/Utils/currency';
 import { formatTanggalWaktu } from '@/Utils/date';
 import { Button } from '@/Components/UI/Button';
-import { Printer, MessageCircle, CheckCircle } from 'lucide-react';
+import { Printer, MessageCircle, Bluetooth, CheckCircle } from 'lucide-react';
+import { EscPosBuilder } from '@/Utils/escpos';
 import html2canvas from 'html2canvas';
 import { usePage } from '@inertiajs/react';
 
@@ -100,6 +102,143 @@ export function ReceiptPrint({ transaction, storeName = 'GreenPOS', storeAddress
     setWaSending(false);
   };
 
+  const [btStatus, setBtStatus] = useState<'idle'|'connecting'|'printing'|'success'|'error'>('idle');
+
+  const handleBluetoothPrint = async () => {
+    try {
+      setBtStatus('connecting');
+      if (!navigator.bluetooth) {
+        throw new Error('Web Bluetooth API tidak didukung di browser ini. Gunakan Google Chrome versi terbaru.');
+      }
+
+      // Meminta pengguna memilih perangkat bluetooth (Printer)
+      const device = await navigator.bluetooth.requestDevice({
+        acceptAllDevices: true,
+        optionalServices: [
+          '000018f0-0000-1000-8000-00805f9b34fb', 
+          'e7810a71-73ae-499d-8c15-faa9aef0c3f2',
+          '49535343-fe7d-4ae5-8fa9-9fafd205e455'
+        ]
+      });
+
+      const server = await device.gatt?.connect();
+      if (!server) throw new Error('Gagal menghubungkan ke perangkat GATT');
+
+      const services = await server.getPrimaryServices();
+      let writeCharacteristic: BluetoothRemoteGATTCharacteristic | null = null;
+      
+      for (const service of services) {
+        const characteristics = await service.getCharacteristics();
+        for (const char of characteristics) {
+          if (char.properties.write || char.properties.writeWithoutResponse) {
+            writeCharacteristic = char;
+            break;
+          }
+        }
+        if (writeCharacteristic) break;
+      }
+
+      if (!writeCharacteristic) {
+        throw new Error('Tidak ditemukan endpoint (characteristic) untuk menulis data ke printer ini.');
+      }
+
+      setBtStatus('printing');
+
+      // Generate ESC/POS Data
+      const builder = new EscPosBuilder();
+      const printWidth = is58mm ? 32 : 48; // jumlah karakter max per baris (perkiraan)
+
+      builder.alignCenter();
+      builder.bold(true);
+      builder.setSize(2, 2);
+      builder.textLine(app_settings?.store_name || storeName);
+      builder.setSize(1, 1);
+      builder.bold(false);
+      builder.textLine(app_settings?.store_address || storeAddress);
+      
+      if (app_settings?.receipt_header) {
+        builder.textLine(app_settings.receipt_header);
+      }
+      builder.newline();
+
+      builder.separator('-', printWidth);
+      builder.alignCenter();
+      builder.textLine(transaction.invoice_number);
+      builder.textLine(transaction.order_type === 'take_away' ? 'TAKE-AWAY' : 'DINE-IN');
+      builder.textLine(formatTanggalWaktu(transaction.created_at));
+      
+      if (transaction.customer_name || transaction.table_number) {
+        let custLine = '';
+        if (transaction.customer_name) custLine += transaction.customer_name;
+        if (transaction.customer_name && transaction.table_number) custLine += ' | ';
+        if (transaction.table_number) custLine += 'Meja ' + transaction.table_number;
+        builder.textLine(custLine);
+      }
+      builder.separator('-', printWidth);
+      builder.alignLeft();
+
+      // Items
+      transaction.items.forEach((item: any) => {
+        builder.textLine(item.product_name);
+        const qtyPrice = `${item.quantity} x ${formatRupiah(item.product_price)}`;
+        builder.justify(qtyPrice, formatRupiah(item.subtotal), printWidth);
+      });
+      builder.separator('-', printWidth);
+
+      // Totals
+      builder.justify('Subtotal', formatRupiah(transaction.subtotal), printWidth);
+      if (transaction.discount_amount > 0) {
+        builder.justify('Diskon', '-' + formatRupiah(transaction.discount_amount), printWidth);
+      }
+      if (transaction.tax_amount > 0) {
+        builder.justify('Pajak', formatRupiah(transaction.tax_amount), printWidth);
+      }
+      builder.separator('=', printWidth);
+      
+      builder.bold(true);
+      builder.justify('TOTAL', formatRupiah(transaction.total), printWidth);
+      builder.bold(false);
+      
+      builder.newline();
+      builder.justify('Metode Bayar', transaction.payment_method.toUpperCase(), printWidth);
+      builder.justify('Tunai/Bayar', formatRupiah(Number(transaction.amount_paid)), printWidth);
+      if (Number(transaction.change_amount) > 0) {
+        builder.bold(true);
+        builder.justify('KEMBALI', formatRupiah(Number(transaction.change_amount)), printWidth);
+        builder.bold(false);
+      }
+      builder.newline();
+
+      if (transaction.notes) {
+        builder.alignCenter();
+        builder.textLine(`"${transaction.notes}"`);
+        builder.newline();
+      }
+
+      builder.alignCenter();
+      builder.textLine(app_settings?.receipt_footer || 'Terima kasih atas kunjungan Anda!');
+      
+      // Feed paper and optionally cut
+      builder.feed(4);
+      builder.cut();
+
+      // Send to printer in chunks
+      const data = builder.getBytes();
+      const CHUNK_SIZE = 100; // max usually ~512 bytes for Bluetooth LE, 100 is safe
+      for (let i = 0; i < data.length; i += CHUNK_SIZE) {
+        const chunk = data.slice(i, i + CHUNK_SIZE);
+        await writeCharacteristic.writeValue(chunk);
+      }
+
+      setBtStatus('success');
+      setTimeout(() => setBtStatus('idle'), 3000);
+      
+    } catch (err: any) {
+      console.error('Bluetooth Print Error:', err);
+      alert('Gagal mencetak via Bluetooth: ' + err.message);
+      setBtStatus('error');
+    }
+  };
 
 
   // Font sizes (smaller for 58mm)
@@ -120,13 +259,18 @@ export function ReceiptPrint({ transaction, storeName = 'GreenPOS', storeAddress
 
   const pad = is58mm ? '12px' : '16px';
 
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%' }}>
       {/* Dynamic print styles */}
       <style>{`
         @media print {
-          body > * { display: none !important; }
-          #receipt-print-portal { display: block !important; }
+          body > *:not(#receipt-print-portal) { display: none !important; }
+          #receipt-print-portal { display: block !important; position: static !important; }
           @page {
             size: ${paperWidthMm} auto;
             margin: 0;
@@ -143,49 +287,52 @@ export function ReceiptPrint({ transaction, storeName = 'GreenPOS', storeAddress
       `}</style>
 
       {/* Hidden portal for printing only — exact paper width */}
-      <div id="receipt-print-portal">
-        <div style={{
-          width: `${paperWidthPx}px`,
-          fontFamily: "'Courier New', Courier, monospace",
-          backgroundColor: '#fff',
-          color: '#111',
-          padding: pad,
-          boxSizing: 'border-box',
-          position: 'relative',
-          borderBottom: '4px dashed #e5e7eb', // Efek struk robek di bawah
-          margin: '0 auto',
-        }}>
-          {/* Watermark LUNAS */}
+      {mounted && typeof document !== 'undefined' ? createPortal(
+        <div id="receipt-print-portal">
           <div style={{
-            position: 'absolute',
-            top: '40%',
-            left: '50%',
-            transform: 'translate(-50%, -50%) rotate(-30deg)',
-            fontSize: is58mm ? '48px' : '72px',
-            fontWeight: 900,
-            color: 'rgba(34, 197, 94, 0.10)', // Hijau sangat transparan
-            border: is58mm ? '6px solid rgba(34, 197, 94, 0.10)' : '10px solid rgba(34, 197, 94, 0.10)',
-            borderRadius: '16px',
-            padding: '10px 20px',
-            pointerEvents: 'none',
-            zIndex: 0,
-            letterSpacing: '0.1em'
+            width: `${paperWidthPx}px`,
+            fontFamily: "'Courier New', Courier, monospace",
+            backgroundColor: '#fff',
+            color: '#111',
+            padding: pad,
+            boxSizing: 'border-box',
+            position: 'relative',
+            borderBottom: '4px dashed #e5e7eb', // Efek struk robek di bawah
+            margin: '0 auto',
           }}>
-            LUNAS
+            {/* Watermark LUNAS */}
+            <div style={{
+              position: 'absolute',
+              top: '40%',
+              left: '50%',
+              transform: 'translate(-50%, -50%) rotate(-30deg)',
+              fontSize: is58mm ? '48px' : '72px',
+              fontWeight: 900,
+              color: 'rgba(34, 197, 94, 0.10)', // Hijau sangat transparan
+              border: is58mm ? '6px solid rgba(34, 197, 94, 0.10)' : '10px solid rgba(34, 197, 94, 0.10)',
+              borderRadius: '16px',
+              padding: '10px 20px',
+              pointerEvents: 'none',
+              zIndex: 0,
+              letterSpacing: '0.1em'
+            }}>
+              LUNAS
+            </div>
+            
+            <div style={{ position: 'relative', zIndex: 1 }}>
+              <ReceiptContent
+                transaction={transaction}
+                storeName={storeName}
+                storeAddress={storeAddress}
+                app_settings={app_settings}
+                fs={fs}
+                is58mm={is58mm}
+              />
+            </div>
           </div>
-          
-          <div style={{ position: 'relative', zIndex: 1 }}>
-            <ReceiptContent
-              transaction={transaction}
-              storeName={storeName}
-              storeAddress={storeAddress}
-              app_settings={app_settings}
-              fs={fs}
-              is58mm={is58mm}
-            />
-          </div>
-        </div>
-      </div>
+        </div>,
+        document.body
+      ) : null}
 
       {/* Success Card */}
       <div style={{
@@ -222,7 +369,15 @@ export function ReceiptPrint({ transaction, storeName = 'GreenPOS', storeAddress
       {/* Action Buttons */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', width: '100%' }}>
         <Button onClick={handlePrint} variant="primary" className="w-full flex justify-center items-center gap-2 h-11">
-          <Printer className="h-4 w-4" /> Cetak Struk
+          <Printer className="h-4 w-4" /> Cetak (Browser)
+        </Button>
+        <Button 
+          onClick={handleBluetoothPrint} 
+          disabled={btStatus === 'connecting' || btStatus === 'printing'}
+          className="w-full flex justify-center items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white border-transparent h-11 disabled:opacity-60"
+        >
+          <Bluetooth className="h-4 w-4" /> 
+          {btStatus === 'connecting' ? 'Menghubungkan...' : btStatus === 'printing' ? 'Mencetak...' : 'Cetak via Bluetooth'}
         </Button>
         {showWhatsapp && customerPhone && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
